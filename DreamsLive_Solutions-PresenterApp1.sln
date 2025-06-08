@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36202.13 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DreamsLive_Solutions-PresenterApp1", "DreamsLive_Solutions-PresenterApp1.csproj", "{C30EECB1-0C13-4ED2-BB50-42741CC984D3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C30EECB1-0C13-4ED2-BB50-42741CC984D3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C30EECB1-0C13-4ED2-BB50-42741CC984D3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C30EECB1-0C13-4ED2-BB50-42741CC984D3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C30EECB1-0C13-4ED2-BB50-42741CC984D3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A64B5A78-F8E0-4F6D-AF4D-9C4D8A31D048}
+	EndGlobalSection
+EndGlobal
