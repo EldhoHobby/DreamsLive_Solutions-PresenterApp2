@@ -174,92 +174,12 @@ namespace DreamsLive_Solutions_PresenterApp1
         // --- Create a new class file for PresentationForm (e.g., PresentationForm.cs) ---
         // Or add this class within the same file as MainForm, outside the MainForm class.
 
+        // --- Create a new class file for PresentationForm (e.g., PresentationForm.cs) ---
+        // Or add this class within the same file as MainForm, outside the MainForm class.
+
         // Required using statements for PresentationForm:
         // using System.Windows.Forms;
         // using System.Drawing;
         // using System.IO;
-
-        public class PresentationForm : Form
-        {
-            private PictureBox pictureBoxOnScreen;
-
-            public PresentationForm(string imagePath, Screen targetScreen)
-            {
-                InitializeComponent(imagePath, targetScreen);
-            }
-
-            private void InitializeComponent(string imagePath, Screen targetScreen)
-            {
-                this.pictureBoxOnScreen = new PictureBox();
-                // It's good practice to suspend layout logic during initialization for performance
-                ((System.ComponentModel.ISupportInitialize)(this.pictureBoxOnScreen)).BeginInit();
-                this.SuspendLayout();
-
-                // Configure PictureBox
-                this.pictureBoxOnScreen.Dock = DockStyle.Fill;
-                this.pictureBoxOnScreen.SizeMode = PictureBoxSizeMode.Zoom; // Or Contain, Stretch, etc. as per preference
-                try
-                {
-                    // It's good practice to check for file existence before attempting to load
-                    if (File.Exists(imagePath))
-                    {
-                        this.pictureBoxOnScreen.Image = Image.FromFile(imagePath);
-                    }
-                    else
-                    {
-                        MessageBox.Show("Image file not found: " + imagePath, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        this.Close(); // Close the presentation form if the image can't be loaded
-                        return;
-                    }
-                }
-                catch (OutOfMemoryException oomEx) // Specific exception for large images / memory issues
-                {
-                    MessageBox.Show("Error loading image: Out of memory. The image might be too large or corrupted.\n" + oomEx.Message, "Image Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    this.Close();
-                    return;
-                }
-                catch (Exception ex) // Generic exception for other loading errors
-                {
-                    MessageBox.Show("Error loading image for presentation: " + ex.Message, "Image Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    this.Close(); // Close the presentation form if the image can't be loaded
-                    return;
-                }
-
-                this.pictureBoxOnScreen.Location = new Point(0, 0); // Dock should handle this, but good for clarity
-                this.pictureBoxOnScreen.Name = "pictureBoxOnScreen";
-                // Size is also handled by Dock, but setting an initial sensible size is okay.
-                this.pictureBoxOnScreen.Size = new Size(targetScreen.Bounds.Width, targetScreen.Bounds.Height);
-                this.pictureBoxOnScreen.TabIndex = 0;
-                this.pictureBoxOnScreen.TabStop = false; // Usually not needed for a display-only PictureBox
-
-                // Configure Form
-                this.AutoScaleDimensions = new SizeF(6F, 13F); // Standard font scaling dimensions
-                this.AutoScaleMode = AutoScaleMode.Font;
-                this.ClientSize = new Size(targetScreen.Bounds.Width, targetScreen.Bounds.Height);
-                this.Controls.Add(this.pictureBoxOnScreen);
-                this.FormBorderStyle = FormBorderStyle.None;
-                this.Name = "PresentationForm";
-                this.Text = "Image Presentation"; // Window title (not visible due to FormBorderStyle.None)
-                this.StartPosition = FormStartPosition.Manual; // We are setting bounds manually
-                this.Bounds = targetScreen.Bounds; // Set bounds to the target screen
-                this.TopMost = true; // Make sure it's on top of other windows
-
-                // Event handler for closing the form (e.g., KeyDown for Escape key) will be added in a subsequent step.
-
-                // End layout suspension and resume layout logic
-                ((System.ComponentModel.ISupportInitialize)(this.pictureBoxOnScreen)).EndInit();
-                this.ResumeLayout(false);
-
-                // Ensure the form loads and displays correctly maximized on the target screen
-                // Using the Load event is a reliable way to set window state after handle creation.
-                this.Load += (s, e) => {
-                    this.WindowState = FormWindowState.Normal; // Set to Normal first if previously Minimized/Maximized on another screen
-                    this.Bounds = targetScreen.Bounds;         // Re-apply bounds to ensure it's on the correct screen
-                    this.WindowState = FormWindowState.Maximized; // Then Maximize
-                };
-            }
-        }
     }
-    
-    
 }
