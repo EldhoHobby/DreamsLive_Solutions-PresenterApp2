@@ -15,9 +15,20 @@ namespace DreamsLive_Solutions_PresenterApp1
     {
         private string selectedImagePath = null;
         private PresentationForm activePresentationForm = null;
+        private Rectangle selectionRectangle = Rectangle.Empty;
+        private Point selectionStartPoint = Point.Empty;
+        private bool isSelecting = false;
         public MainForm()
         {
             InitializeComponent();
+            // Subscribe to picPreview mouse events
+            if (this.picPreview != null) // Ensure picPreview is not null
+            {
+                this.picPreview.MouseDown += new System.Windows.Forms.MouseEventHandler(this.picPreview_MouseDown);
+                this.picPreview.MouseMove += new System.Windows.Forms.MouseEventHandler(this.picPreview_MouseMove);
+                this.picPreview.MouseUp += new System.Windows.Forms.MouseEventHandler(this.picPreview_MouseUp);
+                this.picPreview.Paint += new System.Windows.Forms.PaintEventHandler(this.picPreview_Paint);
+            }
         }
         public class DisplayItem
         {
@@ -38,6 +49,13 @@ namespace DreamsLive_Solutions_PresenterApp1
 
                 if (openFileDialog.ShowDialog() == DialogResult.OK)
                 {
+                    this.selectionRectangle = Rectangle.Empty;
+                    this.isSelecting = false;
+                    if (this.picPreview != null) // Ensure picPreview exists
+                    {
+                        this.picPreview.Invalidate(); // Clear old selection rectangle from display
+                    }
+
                     try
                     {
                         selectedImagePath = openFileDialog.FileName;
@@ -62,8 +80,12 @@ namespace DreamsLive_Solutions_PresenterApp1
                         if (picPreview != null && picPreview.Image != null)
                         {
                             picPreview.Image.Dispose();
-                            picPreview.Image = null;
+                            picPreview.Image = null; // This will trigger a repaint, clearing everything
                         }
+                        // Ensure selection is also cleared if image load fails
+                        this.selectionRectangle = Rectangle.Empty;
+                        // Invalidate again if picPreview still exists, to be certain selection visual is gone
+                        if (this.picPreview != null) this.picPreview.Invalidate();
                     }
                 }
             }
@@ -196,5 +218,76 @@ namespace DreamsLive_Solutions_PresenterApp1
         // using System.Windows.Forms;
         // using System.Drawing;
         // using System.IO;
+
+        private void picPreview_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left && this.picPreview.Image != null)
+            {
+                this.isSelecting = true;
+                this.selectionStartPoint = e.Location; // e.Location is relative to picPreview
+                this.selectionRectangle = Rectangle.Empty; // Clear previous selection
+                this.picPreview.Invalidate(); // Request repaint to clear old rectangle visual
+            }
+        }
+
+        private void picPreview_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (this.isSelecting && this.picPreview.Image != null)
+            {
+                Point currentMousePosition = e.Location;
+                int x = Math.Min(this.selectionStartPoint.X, currentMousePosition.X);
+                int y = Math.Min(this.selectionStartPoint.Y, currentMousePosition.Y);
+                int width = Math.Abs(this.selectionStartPoint.X - currentMousePosition.X);
+                int height = Math.Abs(this.selectionStartPoint.Y - currentMousePosition.Y);
+                this.selectionRectangle = new Rectangle(x, y, width, height);
+                this.picPreview.Invalidate(); // Request repaint to draw updated rectangle
+            }
+        }
+
+        private void picPreview_MouseUp(object sender, MouseEventArgs e)
+        {
+            if (this.isSelecting && this.picPreview.Image != null)
+            {
+                this.isSelecting = false;
+                // Optional: Finalize selectionRectangle based on e.Location (already done by MouseMove)
+                // Optional: Check for minimal size
+                if (this.selectionRectangle.Width < 5 || this.selectionRectangle.Height < 5)
+                {
+                    this.selectionRectangle = Rectangle.Empty; // Discard very small selections
+                }
+                this.picPreview.Invalidate(); // Request repaint for final state
+            }
+        }
+
+        private void picPreview_Paint(object sender, PaintEventArgs e)
+        {
+            // The PictureBox already handles drawing its Image if assigned.
+            // We just need to draw our selection rectangle on top of it.
+            // However, if picPreview.Image is null, we shouldn't attempt to draw a selection.
+
+            if (this.picPreview.Image == null)
+            {
+                // Optional: Clear selection if image is gone
+                // this.selectionRectangle = Rectangle.Empty;
+                return;
+            }
+
+            // Draw the selection rectangle if it's not empty.
+            if (this.selectionRectangle != Rectangle.Empty)
+            {
+                // Use a semi-transparent brush for better visibility (optional)
+                // using (Brush selectionBrush = new SolidBrush(Color.FromArgb(128, 72, 145, 220))) // Example: semi-transparent blue
+                // {
+                // e.Graphics.FillRectangle(selectionBrush, this.selectionRectangle);
+                // }
+
+                // Draw a border for the rectangle
+                // Ensure Pen is disposed if created like this, or use a static Pen.
+                using (Pen selectionPen = new Pen(Color.Red, 2)) // Red border, 2px thick
+                {
+                    e.Graphics.DrawRectangle(selectionPen, this.selectionRectangle);
+                }
+            }
+        }
     }
 }
