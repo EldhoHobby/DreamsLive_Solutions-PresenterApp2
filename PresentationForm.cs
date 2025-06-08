@@ -34,6 +34,7 @@ public class PresentationForm : Form
         // Configure PictureBox
         this.pictureBoxOnScreen.Dock = DockStyle.Fill;
         this.pictureBoxOnScreen.SizeMode = PictureBoxSizeMode.Zoom;
+        this.pictureBoxOnScreen.BackColor = System.Drawing.Color.Black;
         try
         {
             if (File.Exists(imagePath))
@@ -67,6 +68,7 @@ public class PresentationForm : Form
         this.pictureBoxOnScreen.TabStop = false; // Usually false for a display-only PictureBox
 
         // Configure Form
+        this.BackColor = System.Drawing.Color.Black;
         this.AutoScaleDimensions = new SizeF(6F, 13F);
         this.AutoScaleMode = AutoScaleMode.Font;
         this.ClientSize = new Size(targetScreen.Bounds.Width, targetScreen.Bounds.Height);
@@ -106,5 +108,41 @@ public class PresentationForm : Form
     private void PresentationForm_Click(object sender, EventArgs e)
     {
         this.Close(); // Closes the PresentationForm
+    }
+
+    public void UpdateImage(string newImagePath)
+    {
+        // Dispose of the current image if it's not null
+        if (this.pictureBoxOnScreen.Image != null)
+        {
+            this.pictureBoxOnScreen.Image.Dispose();
+            this.pictureBoxOnScreen.Image = null; // Explicitly set to null after disposing
+        }
+
+        try
+        {
+            if (File.Exists(newImagePath))
+            {
+                this.pictureBoxOnScreen.Image = Image.FromFile(newImagePath);
+            }
+            else
+            {
+                MessageBox.Show("Image file not found: " + newImagePath, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                this.pictureBoxOnScreen.Image = null; // Clear image on error
+            }
+        }
+        catch (OutOfMemoryException oomEx)
+        {
+            MessageBox.Show("Error loading image: Out of memory. The image might be too large or corrupted.\n" + oomEx.Message, "Image Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            this.pictureBoxOnScreen.Image = null; // Clear image on error
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Error loading image for presentation: " + ex.Message, "Image Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            this.pictureBoxOnScreen.Image = null; // Clear image on error
+        }
+
+        // Ensure the form is brought to the front and activated
+        this.Activate();
     }
 }
