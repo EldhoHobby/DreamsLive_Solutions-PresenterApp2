@@ -3,9 +3,26 @@ using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
 
+public class DoubleBufferedPanel : System.Windows.Forms.Panel
+{
+    public DoubleBufferedPanel()
+    {
+        this.DoubleBuffered = true;
+        this.SetStyle(System.Windows.Forms.ControlStyles.OptimizedDoubleBuffer |
+                      System.Windows.Forms.ControlStyles.AllPaintingInWmPaint |
+                      System.Windows.Forms.ControlStyles.UserPaint, true);
+    }
+}
+
 public class PresentationForm : Form
 {
-    private PictureBox pictureBoxOnScreen;
+    private DoubleBufferedPanel displayPanel;
+    private Image currentImage = null;
+    private float currentZoom = 1.0f;
+    private PointF currentPan = PointF.Empty;
+    private TrackBar zoomSlider;
+    private bool isPanning = false;
+    private Point lastMousePosition = Point.Empty;
 
     public PresentationForm(string imagePath, Screen targetScreen)
     {
@@ -16,34 +33,40 @@ public class PresentationForm : Form
 
         // Optional: Close on click (can be on PictureBox or Form itself)
         // If PictureBox covers the whole form, its click might be more intuitive.
-        // Ensure the PictureBox can receive focus/events, or attach to the form's click.
-        if (this.pictureBoxOnScreen != null) // Ensure pictureBoxOnScreen is initialized
+        // Ensure the displayPanel can receive focus/events, or attach to the form's click.
+        if (this.displayPanel != null) // Ensure displayPanel is initialized
         {
-            this.pictureBoxOnScreen.Click += PresentationForm_Click;
+            this.displayPanel.Click += PresentationForm_Click;
         }
-        // Alternatively, to close on any click on the form (even if PictureBox doesn't cover everything or doesn't handle clicks):
+        // Alternatively, to close on any click on the form (even if displayPanel doesn't cover everything or doesn't handle clicks):
         // this.Click += PresentationForm_Click;
     }
 
     private void InitializeComponent(string imagePath, Screen targetScreen)
     {
-        this.pictureBoxOnScreen = new PictureBox();
-        ((System.ComponentModel.ISupportInitialize)(this.pictureBoxOnScreen)).BeginInit();
+        this.displayPanel = new DoubleBufferedPanel();
+        this.zoomSlider = new TrackBar();
         this.SuspendLayout();
 
-        // Configure PictureBox
-        this.pictureBoxOnScreen.Dock = DockStyle.Fill;
-        this.pictureBoxOnScreen.SizeMode = PictureBoxSizeMode.Zoom;
-        this.pictureBoxOnScreen.BackColor = System.Drawing.Color.Black;
+        // Configure Panel
+        this.displayPanel.Dock = DockStyle.Fill;
+        this.displayPanel.BackColor = Color.Black;
+        this.displayPanel.Paint += new System.Windows.Forms.PaintEventHandler(this.displayPanel_Paint);
+        this.displayPanel.MouseDown += new System.Windows.Forms.MouseEventHandler(this.displayPanel_MouseDown);
+        this.displayPanel.MouseMove += new System.Windows.Forms.MouseEventHandler(this.displayPanel_MouseMove);
+        this.displayPanel.MouseUp += new System.Windows.Forms.MouseEventHandler(this.displayPanel_MouseUp);
+
+        // Load initial image
         try
         {
             if (File.Exists(imagePath))
             {
-                this.pictureBoxOnScreen.Image = Image.FromFile(imagePath);
+                this.currentImage = Image.FromFile(imagePath);
             }
             else
             {
                 MessageBox.Show("Image file not found: " + imagePath, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                this.currentImage = null; // Explicitly set to null on error before Close() might be called
                 this.Close();
                 return;
             }
@@ -51,28 +74,34 @@ public class PresentationForm : Form
         catch (OutOfMemoryException oomEx)
         {
             MessageBox.Show("Error loading image: Out of memory. The image might be too large or corrupted.\n" + oomEx.Message, "Image Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            this.currentImage = null;
             this.Close();
             return;
         }
         catch (Exception ex)
         {
             MessageBox.Show("Error loading image for presentation: " + ex.Message, "Image Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            this.currentImage = null;
             this.Close();
             return;
         }
 
-        this.pictureBoxOnScreen.Location = new Point(0, 0);
-        this.pictureBoxOnScreen.Name = "pictureBoxOnScreen";
-        this.pictureBoxOnScreen.Size = new Size(targetScreen.Bounds.Width, targetScreen.Bounds.Height);
-        this.pictureBoxOnScreen.TabIndex = 0;
-        this.pictureBoxOnScreen.TabStop = false; // Usually false for a display-only PictureBox
+        // Configure Zoom Slider
+        this.zoomSlider.Dock = DockStyle.Bottom;
+        this.zoomSlider.Minimum = 10; // 10%
+        this.zoomSlider.Maximum = 500; // 500%
+        this.zoomSlider.Value = 100; // 100%
+        this.zoomSlider.TickFrequency = 10;
+        this.zoomSlider.Scroll += new System.EventHandler(this.zoomSlider_Scroll);
 
         // Configure Form
         this.BackColor = System.Drawing.Color.Black;
+        // this.SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true); // Removed, panel handles its own
         this.AutoScaleDimensions = new SizeF(6F, 13F);
         this.AutoScaleMode = AutoScaleMode.Font;
         this.ClientSize = new Size(targetScreen.Bounds.Width, targetScreen.Bounds.Height);
-        this.Controls.Add(this.pictureBoxOnScreen);
+        this.Controls.Add(this.displayPanel); // Add panel first so it's behind slider
+        this.Controls.Add(this.zoomSlider);
         this.FormBorderStyle = FormBorderStyle.None;
         this.Name = "PresentationForm";
         this.Text = "Presentation"; // Not visible, but good practice
@@ -81,8 +110,10 @@ public class PresentationForm : Form
         this.TopMost = true;
         this.KeyPreview = true; // Important: Allows the form to receive key events before controls on it.
 
-        ((System.ComponentModel.ISupportInitialize)(this.pictureBoxOnScreen)).EndInit();
         this.ResumeLayout(false);
+
+        // Constructor no longer calls SetupInitialView directly.
+        // It will be called by the Load event.
 
         this.Load += (s, e) => {
             this.WindowState = FormWindowState.Normal; // Important before setting bounds and maximizing
@@ -92,7 +123,68 @@ public class PresentationForm : Form
             // Ensure the form can receive keyboard input immediately after loading
             this.Activate(); // Brings the form to the foreground and activates it.
             this.Focus();    // Sets input focus to the form.
+            SetupInitialView(); // Call here
         };
+    }
+
+    private void SetupInitialView()
+    {
+        if (this.currentImage == null || this.displayPanel == null || this.displayPanel.ClientSize.Width == 0 || this.displayPanel.ClientSize.Height == 0 || this.zoomSlider == null)
+        {
+            // Sensible defaults if image or panel not ready
+            this.currentZoom = 1.0f;
+            if(this.zoomSlider != null) this.zoomSlider.Value = 100;
+            this.currentPan = PointF.Empty;
+            if(this.displayPanel != null) this.displayPanel.Invalidate();
+            return;
+        }
+
+        float zoomX = (float)this.displayPanel.ClientSize.Width / this.currentImage.Width;
+        float zoomY = (float)this.displayPanel.ClientSize.Height / this.currentImage.Height;
+        this.currentZoom = Math.Min(zoomX, zoomY);
+
+        // Update slider and re-clamp currentZoom based on slider limits
+        int newSliderValue = (int)(this.currentZoom * 100);
+        if (newSliderValue < this.zoomSlider.Minimum) newSliderValue = this.zoomSlider.Minimum;
+        if (newSliderValue > this.zoomSlider.Maximum) newSliderValue = this.zoomSlider.Maximum;
+        this.zoomSlider.Value = newSliderValue;
+        this.currentZoom = this.zoomSlider.Value / 100.0f; // Ensure currentZoom reflects actual slider value
+
+        // Initial Pan calculation (center the image)
+        this.currentPan.X = (this.currentImage.Width / 2.0f) - (this.displayPanel.ClientSize.Width / this.currentZoom / 2.0f);
+        this.currentPan.Y = (this.currentImage.Height / 2.0f) - (this.displayPanel.ClientSize.Height / this.currentZoom / 2.0f);
+
+        ApplyPanBoundaries(); // Crucial: this will adjust pan if image is smaller/larger than panel
+
+        this.displayPanel.Invalidate();
+    }
+
+    private void zoomSlider_Scroll(object sender, EventArgs e)
+    {
+        if (this.currentImage == null || this.displayPanel == null || this.displayPanel.ClientSize.Width == 0 || this.displayPanel.ClientSize.Height == 0)
+        {
+            this.currentZoom = this.zoomSlider.Value / 100.0f;
+            if (this.displayPanel != null) this.displayPanel.Invalidate();
+            return;
+        }
+
+        float oldZoom = this.currentZoom;
+        float newZoom = this.zoomSlider.Value / 100.0f;
+        if (newZoom <= 0) newZoom = 0.01f; // Prevent zoom from being zero or negative
+
+        // Calculate the image point that is currently at the center of the panel
+        float imagePointAtPanelCenterX = this.currentPan.X + (this.displayPanel.ClientSize.Width / 2.0f) / oldZoom;
+        float imagePointAtPanelCenterY = this.currentPan.Y + (this.displayPanel.ClientSize.Height / 2.0f) / oldZoom;
+
+        this.currentZoom = newZoom;
+
+        // Update pan to keep the same image point at the center of the panel
+        this.currentPan.X = imagePointAtPanelCenterX - (this.displayPanel.ClientSize.Width / 2.0f) / this.currentZoom;
+        this.currentPan.Y = imagePointAtPanelCenterY - (this.displayPanel.ClientSize.Height / 2.0f) / this.currentZoom;
+
+        ApplyPanBoundaries();
+
+        this.displayPanel.Invalidate();
     }
 
     // Event handler for KeyDown event on the Form
@@ -104,45 +196,216 @@ public class PresentationForm : Form
         }
     }
 
-    // Optional: Event handler for Click event (on PictureBox) to also close the form
+    // Optional: Event handler for Click event (on Panel) to also close the form
     private void PresentationForm_Click(object sender, EventArgs e)
     {
         this.Close(); // Closes the PresentationForm
     }
 
+    private void displayPanel_Paint(object sender, PaintEventArgs e)
+    {
+        e.Graphics.Clear(Color.Black);
+        if (this.currentImage == null || this.currentZoom <= 0 || this.displayPanel.ClientSize.Width == 0 || this.displayPanel.ClientSize.Height == 0)
+        {
+            return;
+        }
+
+        e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+
+        float srcRectX = this.currentPan.X;
+        float srcRectY = this.currentPan.Y;
+        float srcRectWidth = this.displayPanel.ClientSize.Width / this.currentZoom;
+        float srcRectHeight = this.displayPanel.ClientSize.Height / this.currentZoom;
+
+        RectangleF srcRect = new RectangleF(srcRectX, srcRectY, srcRectWidth, srcRectHeight);
+
+        // Boundary checks for srcRect relative to the image dimensions
+        srcRect.X = Math.Max(0f, srcRect.X);
+        srcRect.Y = Math.Max(0f, srcRect.Y);
+
+        if (srcRect.X + srcRect.Width > this.currentImage.Width)
+        {
+            srcRect.Width = this.currentImage.Width - srcRect.X;
+        }
+        if (srcRect.Y + srcRect.Height > this.currentImage.Height)
+        {
+            srcRect.Height = this.currentImage.Height - srcRect.Y;
+        }
+
+        // Ensure width and height are not negative after adjustments
+        if (srcRect.Width < 0) srcRect.Width = 0;
+        if (srcRect.Height < 0) srcRect.Height = 0;
+
+
+        if (srcRect.Width > 0 && srcRect.Height > 0)
+        {
+            Rectangle destRect = new Rectangle(0, 0, this.displayPanel.ClientSize.Width, this.displayPanel.ClientSize.Height);
+            e.Graphics.DrawImage(this.currentImage, destRect, srcRect, GraphicsUnit.Pixel);
+        }
+    }
+
+    private void displayPanel_MouseDown(object sender, MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+        {
+            this.isPanning = true;
+            this.lastMousePosition = e.Location;
+            this.displayPanel.Cursor = Cursors.Hand; // Optional: change cursor
+        }
+    }
+
+    private void displayPanel_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (this.isPanning)
+        {
+            int deltaX = e.Location.X - this.lastMousePosition.X;
+            int deltaY = e.Location.Y - this.lastMousePosition.Y;
+
+            // Panning needs to be scaled inversely to zoom for intuitive movement.
+            this.currentPan.X += (deltaX / this.currentZoom);
+            this.currentPan.Y += (deltaY / this.currentZoom);
+
+            ApplyPanBoundaries();
+
+            this.lastMousePosition = e.Location;
+            this.displayPanel.Invalidate();
+        }
+    }
+
+    private void displayPanel_MouseUp(object sender, MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+        {
+            this.isPanning = false;
+            this.displayPanel.Cursor = Cursors.Default; // Optional: reset cursor
+        }
+    }
+
     public void UpdateImage(string newImagePath)
     {
         // Dispose of the current image if it's not null
-        if (this.pictureBoxOnScreen.Image != null)
+        if (this.currentImage != null)
         {
-            this.pictureBoxOnScreen.Image.Dispose();
-            this.pictureBoxOnScreen.Image = null; // Explicitly set to null after disposing
+            this.currentImage.Dispose();
+            this.currentImage = null; // Explicitly set to null after disposing
         }
 
         try
         {
             if (File.Exists(newImagePath))
             {
-                this.pictureBoxOnScreen.Image = Image.FromFile(newImagePath);
+                this.currentImage = Image.FromFile(newImagePath);
             }
             else
             {
                 MessageBox.Show("Image file not found: " + newImagePath, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                this.pictureBoxOnScreen.Image = null; // Clear image on error
+                this.currentImage = null; // Clear image on error
             }
         }
         catch (OutOfMemoryException oomEx)
         {
             MessageBox.Show("Error loading image: Out of memory. The image might be too large or corrupted.\n" + oomEx.Message, "Image Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            this.pictureBoxOnScreen.Image = null; // Clear image on error
+            this.currentImage = null; // Clear image on error
         }
         catch (Exception ex)
         {
             MessageBox.Show("Error loading image for presentation: " + ex.Message, "Image Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            this.pictureBoxOnScreen.Image = null; // Clear image on error
+            this.currentImage = null; // Clear image on error
         }
 
-        // Ensure the form is brought to the front and activated
+        // if (this.currentImage != null && this.displayPanel != null && this.displayPanel.ClientSize.Width > 0 && this.displayPanel.ClientSize.Height > 0)
+        // {
+        //     float zoomX = (float)this.displayPanel.ClientSize.Width / this.currentImage.Width;
+        //     float zoomY = (float)this.displayPanel.ClientSize.Height / this.currentImage.Height;
+        //     this.currentZoom = Math.Min(zoomX, zoomY);
+
+        //     this.currentPan.X = (this.currentImage.Width / 2.0f) - (this.displayPanel.ClientSize.Width / this.currentZoom / 2.0f);
+        //     this.currentPan.Y = (this.currentImage.Height / 2.0f) - (this.displayPanel.ClientSize.Height / this.currentZoom / 2.0f);
+
+        //     ApplyPanBoundaries();
+
+        //     int sliderValue = (int)(this.currentZoom * 100);
+        //     if (sliderValue < this.zoomSlider.Minimum) sliderValue = this.zoomSlider.Minimum;
+        //     if (sliderValue > this.zoomSlider.Maximum) sliderValue = this.zoomSlider.Maximum;
+        //     this.zoomSlider.Value = sliderValue;
+        //     // Ensure currentZoom reflects the actual slider value
+        //     this.currentZoom = this.zoomSlider.Value / 100.0f;
+        //     this.currentPan.X = (this.currentImage.Width / 2.0f) - (this.displayPanel.ClientSize.Width / this.currentZoom / 2.0f);
+        //     this.currentPan.Y = (this.currentImage.Height / 2.0f) - (this.displayPanel.ClientSize.Height / this.currentZoom / 2.0f);
+        //     ApplyPanBoundaries();
+        // }
+        // else if (this.zoomSlider != null)
+        // {
+        //     this.currentZoom = 1.0f;
+        //     this.zoomSlider.Value = 100;
+        //     this.currentPan = PointF.Empty;
+        // }
+
+        // if (this.displayPanel != null)
+        // {
+        //     this.displayPanel.Invalidate(); // Trigger repaint
+        // }
+        SetupInitialView(); // Call this to set zoom/pan for the new image
+
         this.Activate();
+    }
+
+    private void ApplyPanBoundaries()
+    {
+        if (this.currentImage == null || this.currentZoom <= 0 || this.displayPanel == null || this.displayPanel.ClientSize.Width == 0 || this.displayPanel.ClientSize.Height == 0) return;
+
+        float panelWidth = this.displayPanel.ClientSize.Width;
+        float panelHeight = this.displayPanel.ClientSize.Height;
+
+        // Calculate the effective width and height of the image if it were fully displayed at currentPan.X = 0, currentPan.Y = 0
+        // This is not zoomedImageWidth/Height, but rather the maximum extent of the image in its own coordinate system.
+        float maxImageX = this.currentImage.Width;
+        float maxImageY = this.currentImage.Height;
+
+        // Calculate the width/height of the viewport in terms of image pixels
+        float viewportWidthInImagePixels = panelWidth / this.currentZoom;
+        float viewportHeightInImagePixels = panelHeight / this.currentZoom;
+
+        // If the zoomed image is smaller than the panel, center it.
+        // currentPan.X here represents the top-left X of the source rectangle.
+        if (maxImageX < viewportWidthInImagePixels) // Image width is smaller than viewport width in image pixels
+        {
+             // Center X: (image_width / 2) - (viewport_width_in_image_pixels / 2)
+            this.currentPan.X = (this.currentImage.Width / 2.0f) - (viewportWidthInImagePixels / 2.0f);
+        }
+        else
+        {
+            // Max value for currentPan.X is when the right edge of the image aligns with the right edge of the viewport
+            // maxPanX = image_width - viewport_width_in_image_pixels
+            float maxPanX = this.currentImage.Width - viewportWidthInImagePixels;
+            this.currentPan.X = Math.Max(0, Math.Min(this.currentPan.X, maxPanX));
+        }
+
+        if (maxImageY < viewportHeightInImagePixels) // Image height is smaller than viewport height in image pixels
+        {
+            // Center Y: (image_height / 2) - (viewport_height_in_image_pixels / 2)
+            this.currentPan.Y = (this.currentImage.Height / 2.0f) - (viewportHeightInImagePixels / 2.0f);
+        }
+        else
+        {
+            // Max value for currentPan.Y is when the bottom edge of the image aligns with the bottom edge of the viewport
+            // maxPanY = image_height - viewport_height_in_image_pixels
+            float maxPanY = this.currentImage.Height - viewportHeightInImagePixels;
+            this.currentPan.Y = Math.Max(0, Math.Min(this.currentPan.Y, maxPanY));
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // if (components != null) components.Dispose(); // Only if 'components' field exists
+            if (this.currentImage != null)
+            {
+                this.currentImage.Dispose();
+                this.currentImage = null;
+            }
+        }
+        base.Dispose(disposing);
     }
 }
