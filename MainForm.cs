@@ -180,11 +180,18 @@ namespace DreamsLive_Solutions_PresenterApp1
 
             Screen targetScreen = selectedDisplayItem.DisplayScreen;
 
+            RectangleF? selectedRegionInImageCoords = GetSelectedRegionInImageCoordinates();
+
             // Check if an active presentation form already exists and is not disposed
             if (activePresentationForm != null && !activePresentationForm.IsDisposed)
             {
                 // If it exists and is not disposed, update its image
-                activePresentationForm.UpdateImage(selectedImagePath);
+                activePresentationForm.UpdateImage(selectedImagePath, selectedRegionInImageCoords);
+                if (activePresentationForm.WindowState == FormWindowState.Minimized)
+                {
+                    activePresentationForm.WindowState = FormWindowState.Normal;
+                }
+                activePresentationForm.Activate(); // Bring to front
             }
             else
             {
@@ -194,7 +201,7 @@ namespace DreamsLive_Solutions_PresenterApp1
                 // You might want to add logic to prevent multiple PresentationForms from opening
                 // or to manage the state of the btnStartPresentation button.
 
-                activePresentationForm = new PresentationForm(selectedImagePath, targetScreen);
+                activePresentationForm = new PresentationForm(selectedImagePath, targetScreen, selectedRegionInImageCoords);
                 activePresentationForm.FormClosed += (s, args) => {
                     // Re-enable start button or main form when presentation is closed
                     // For example: btnStartPresentation.Enabled = true;
@@ -288,6 +295,63 @@ namespace DreamsLive_Solutions_PresenterApp1
                     e.Graphics.DrawRectangle(selectionPen, this.selectionRectangle);
                 }
             }
+        }
+
+        private RectangleF? GetSelectedRegionInImageCoordinates()
+        {
+            if (this.picPreview.Image == null || this.selectionRectangle == Rectangle.Empty || this.picPreview.ClientSize.Width == 0 || this.picPreview.ClientSize.Height == 0)
+            {
+                return null;
+            }
+
+            Image img = this.picPreview.Image;
+            Rectangle clientRect = this.picPreview.ClientRectangle; // Using ClientRectangle
+
+            float imgAspectRatio = (float)img.Width / img.Height;
+            float picBoxAspectRatio = (float)clientRect.Width / clientRect.Height;
+
+            float scaleFactor;
+            if (imgAspectRatio > picBoxAspectRatio)
+            {
+                scaleFactor = (float)clientRect.Width / img.Width;
+            }
+            else
+            {
+                scaleFactor = (float)clientRect.Height / img.Height;
+            }
+
+            if (scaleFactor <= 0) return null;
+
+            float displayedImageWidth = img.Width * scaleFactor;
+            float displayedImageHeight = img.Height * scaleFactor;
+
+            float offsetX = (clientRect.Width - displayedImageWidth) / 2.0f;
+            float offsetY = (clientRect.Height - displayedImageHeight) / 2.0f;
+
+            float selRelX = this.selectionRectangle.X - offsetX;
+            float selRelY = this.selectionRectangle.Y - offsetY;
+
+            float originalX = selRelX / scaleFactor;
+            float originalY = selRelY / scaleFactor;
+            float originalWidth = this.selectionRectangle.Width / scaleFactor;
+            float originalHeight = this.selectionRectangle.Height / scaleFactor;
+
+            // Boundary checks
+            if (originalX < 0) { originalWidth += originalX; originalX = 0; }
+            if (originalX >= img.Width) { originalX = img.Width - 1; originalWidth = 0; }
+
+            if (originalY < 0) { originalHeight += originalY; originalY = 0; }
+            if (originalY >= img.Height) { originalY = img.Height - 1; originalHeight = 0; }
+
+            if (originalX + originalWidth > img.Width) { originalWidth = img.Width - originalX; }
+            if (originalY + originalHeight > img.Height) { originalHeight = img.Height - originalY; }
+
+            if (originalWidth <= 0 || originalHeight <= 0)
+            {
+                return null;
+            }
+
+            return new RectangleF(originalX, originalY, originalWidth, originalHeight);
         }
     }
 }

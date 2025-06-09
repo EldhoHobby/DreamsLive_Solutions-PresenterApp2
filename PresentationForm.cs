@@ -23,9 +23,11 @@ public class PresentationForm : Form
     private TrackBar zoomSlider;
     private bool isPanning = false;
     private Point lastMousePosition = Point.Empty;
+    private RectangleF? initialSourceRegion = null;
 
-    public PresentationForm(string imagePath, Screen targetScreen)
+    public PresentationForm(string imagePath, Screen targetScreen, RectangleF? initialRegion = null)
     {
+        this.initialSourceRegion = initialRegion;
         InitializeComponent(imagePath, targetScreen);
 
         // Add event handlers for closing the form
@@ -129,34 +131,55 @@ public class PresentationForm : Form
 
     private void SetupInitialView()
     {
-        if (this.currentImage == null || this.displayPanel == null || this.displayPanel.ClientSize.Width == 0 || this.displayPanel.ClientSize.Height == 0 || this.zoomSlider == null)
+        if (this.currentImage == null || this.displayPanel == null || this.displayPanel.ClientSize.Width == 0 || this.displayPanel.ClientSize.Height == 0)
         {
-            // Sensible defaults if image or panel not ready
             this.currentZoom = 1.0f;
-            if(this.zoomSlider != null) this.zoomSlider.Value = 100;
+            if (this.zoomSlider != null) this.zoomSlider.Value = 100;
             this.currentPan = PointF.Empty;
-            if(this.displayPanel != null) this.displayPanel.Invalidate();
+            if (this.displayPanel != null) this.displayPanel.Invalidate();
             return;
         }
 
-        float zoomX = (float)this.displayPanel.ClientSize.Width / this.currentImage.Width;
-        float zoomY = (float)this.displayPanel.ClientSize.Height / this.currentImage.Height;
-        this.currentZoom = Math.Min(zoomX, zoomY);
+        if (this.initialSourceRegion.HasValue && this.initialSourceRegion.Value.Width > 0 && this.initialSourceRegion.Value.Height > 0)
+        {
+            RectangleF region = this.initialSourceRegion.Value;
+
+            // Calculate zoom to fit the selected region within the panel
+            float zoomX = (float)this.displayPanel.ClientSize.Width / region.Width;
+            float zoomY = (float)this.displayPanel.ClientSize.Height / region.Height;
+            this.currentZoom = Math.Min(zoomX, zoomY);
+
+            // Set pan to the top-left of the selected region
+            this.currentPan = new PointF(region.X, region.Y);
+        }
+        else
+        {
+            // Fallback: Fit entire image if no valid region is provided
+            float zoomX = (float)this.displayPanel.ClientSize.Width / this.currentImage.Width;
+            float zoomY = (float)this.displayPanel.ClientSize.Height / this.currentImage.Height;
+            this.currentZoom = Math.Min(zoomX, zoomY);
+
+            // Center the full image
+            this.currentPan.X = (this.currentImage.Width / 2.0f) - (this.displayPanel.ClientSize.Width / this.currentZoom / 2.0f);
+            this.currentPan.Y = (this.currentImage.Height / 2.0f) - (this.displayPanel.ClientSize.Height / this.currentZoom / 2.0f);
+        }
 
         // Update slider and re-clamp currentZoom based on slider limits
-        int newSliderValue = (int)(this.currentZoom * 100);
-        if (newSliderValue < this.zoomSlider.Minimum) newSliderValue = this.zoomSlider.Minimum;
-        if (newSliderValue > this.zoomSlider.Maximum) newSliderValue = this.zoomSlider.Maximum;
-        this.zoomSlider.Value = newSliderValue;
-        this.currentZoom = this.zoomSlider.Value / 100.0f; // Ensure currentZoom reflects actual slider value
+        if (this.zoomSlider != null) // Ensure slider is initialized
+        {
+            int newSliderValue = (int)(this.currentZoom * 100);
+            if (newSliderValue < this.zoomSlider.Minimum) newSliderValue = this.zoomSlider.Minimum;
+            if (newSliderValue > this.zoomSlider.Maximum) newSliderValue = this.zoomSlider.Maximum;
+            this.zoomSlider.Value = newSliderValue;
+            this.currentZoom = this.zoomSlider.Value / 100.0f; // Ensure currentZoom reflects actual slider value
+            if(this.currentZoom <= 0) this.currentZoom = 0.01f; // Prevent zoom from being zero or negative
+        } else {
+            if(this.currentZoom <= 0) this.currentZoom = 0.01f; // Still prevent bad zoom even if slider not ready
+        }
 
-        // Initial Pan calculation (center the image)
-        this.currentPan.X = (this.currentImage.Width / 2.0f) - (this.displayPanel.ClientSize.Width / this.currentZoom / 2.0f);
-        this.currentPan.Y = (this.currentImage.Height / 2.0f) - (this.displayPanel.ClientSize.Height / this.currentZoom / 2.0f);
+        ApplyPanBoundaries();
 
-        ApplyPanBoundaries(); // Crucial: this will adjust pan if image is smaller/larger than panel
-
-        this.displayPanel.Invalidate();
+        if (this.displayPanel != null) this.displayPanel.Invalidate();
     }
 
     private void zoomSlider_Scroll(object sender, EventArgs e)
@@ -281,7 +304,7 @@ public class PresentationForm : Form
         }
     }
 
-    public void UpdateImage(string newImagePath)
+    public void UpdateImage(string newImagePath, RectangleF? initialRegion = null)
     {
         // Dispose of the current image if it's not null
         if (this.currentImage != null)
@@ -345,6 +368,7 @@ public class PresentationForm : Form
         // {
         //     this.displayPanel.Invalidate(); // Trigger repaint
         // }
+        this.initialSourceRegion = initialRegion; // Store the new region before calling SetupInitialView
         SetupInitialView(); // Call this to set zoom/pan for the new image
 
         this.Activate();
