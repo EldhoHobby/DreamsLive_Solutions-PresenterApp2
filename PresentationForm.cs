@@ -167,14 +167,26 @@ public class PresentationForm : Form
         // Update slider and re-clamp currentZoom based on slider limits
         if (this.zoomSlider != null) // Ensure slider is initialized
         {
+            // Temporarily unsubscribe from the Scroll event
+            this.zoomSlider.Scroll -= new System.EventHandler(this.zoomSlider_Scroll);
+
             int newSliderValue = (int)(this.currentZoom * 100);
             if (newSliderValue < this.zoomSlider.Minimum) newSliderValue = this.zoomSlider.Minimum;
             if (newSliderValue > this.zoomSlider.Maximum) newSliderValue = this.zoomSlider.Maximum;
+
             this.zoomSlider.Value = newSliderValue;
-            this.currentZoom = this.zoomSlider.Value / 100.0f; // Ensure currentZoom reflects actual slider value
-            if(this.currentZoom <= 0) this.currentZoom = 0.01f; // Prevent zoom from being zero or negative
-        } else {
-            if(this.currentZoom <= 0) this.currentZoom = 0.01f; // Still prevent bad zoom even if slider not ready
+
+            // Re-confirm currentZoom from the actual slider value (potentially clamped)
+            this.currentZoom = this.zoomSlider.Value / 100.0f;
+            if(this.currentZoom <= 0) this.currentZoom = 0.01f; // Prevent zero or negative zoom
+
+            // Re-subscribe to the Scroll event
+            this.zoomSlider.Scroll += new System.EventHandler(this.zoomSlider_Scroll);
+        }
+        else
+        {
+            // Ensure zoom is valid even if slider isn't ready (e.g. during very early init)
+            if(this.currentZoom <= 0) this.currentZoom = 0.01f;
         }
 
         ApplyPanBoundaries();

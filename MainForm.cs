@@ -242,12 +242,58 @@ namespace DreamsLive_Solutions_PresenterApp1
             if (this.isSelecting && this.picPreview.Image != null)
             {
                 Point currentMousePosition = e.Location;
-                int x = Math.Min(this.selectionStartPoint.X, currentMousePosition.X);
-                int y = Math.Min(this.selectionStartPoint.Y, currentMousePosition.Y);
-                int width = Math.Abs(this.selectionStartPoint.X - currentMousePosition.X);
-                int height = Math.Abs(this.selectionStartPoint.Y - currentMousePosition.Y);
-                this.selectionRectangle = new Rectangle(x, y, width, height);
-                this.picPreview.Invalidate(); // Request repaint to draw updated rectangle
+                int rawX = Math.Min(this.selectionStartPoint.X, currentMousePosition.X);
+                int rawY = Math.Min(this.selectionStartPoint.Y, currentMousePosition.Y);
+                int rawWidth = Math.Abs(this.selectionStartPoint.X - currentMousePosition.X);
+                int rawHeight = Math.Abs(this.selectionStartPoint.Y - currentMousePosition.Y);
+
+                if (rawWidth == 0 || rawHeight == 0) // Avoid division by zero or no actual drag
+                {
+                    this.selectionRectangle = new Rectangle(rawX, rawY, rawWidth, rawHeight);
+                    this.picPreview.Invalidate();
+                    return;
+                }
+
+                double targetAspectRatio = 0;
+                DisplayItem selectedDisplayItem = cmbDisplays.SelectedItem as DisplayItem;
+
+                if (selectedDisplayItem != null && selectedDisplayItem.DisplayScreen != null)
+                {
+                    Screen targetScreen = selectedDisplayItem.DisplayScreen;
+                    if (targetScreen.Bounds.Height > 0) // Avoid division by zero for aspect ratio
+                    {
+                        targetAspectRatio = (double)targetScreen.Bounds.Width / targetScreen.Bounds.Height;
+                    }
+                }
+
+                if (targetAspectRatio > 0) // If a valid aspect ratio is obtained
+                {
+                    // Adjust width or height to fit the targetAspectRatio within the raw dragged box
+                    int finalWidth = rawWidth;
+                    int finalHeight = rawHeight;
+
+                    // Calculate potential height based on rawWidth and targetAspectRatio
+                    int heightFromWidth = (int)(rawWidth / targetAspectRatio);
+                    // Calculate potential width based on rawHeight and targetAspectRatio
+                    int widthFromHeight = (int)(rawHeight * targetAspectRatio);
+
+                    if (heightFromWidth <= rawHeight)
+                    {
+                        // Width is the limiting dimension for the aspect ratio within the raw dragged box
+                        finalHeight = heightFromWidth;
+                    }
+                    else // widthFromHeight <= rawWidth (Height is the limiting dimension)
+                    {
+                        finalWidth = widthFromHeight;
+                    }
+                    this.selectionRectangle = new Rectangle(rawX, rawY, finalWidth, finalHeight);
+                }
+                else // Fallback to free-form selection if no valid target aspect ratio
+                {
+                    this.selectionRectangle = new Rectangle(rawX, rawY, rawWidth, rawHeight);
+                }
+
+                this.picPreview.Invalidate();
             }
         }
 
