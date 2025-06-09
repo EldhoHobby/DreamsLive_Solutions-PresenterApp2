@@ -3,6 +3,16 @@ using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
 
+// Define Enum here
+public enum ImageDisplayMode
+{
+    Fit,    // Maintain aspect ratio, fit entire image, letter/pillarbox if needed.
+    Fill,   // Maintain aspect ratio, fill entire screen, crop if needed.
+    Stretch,// Ignore aspect ratio, fill entire screen by stretching/compressing.
+    Tile,   // Repeat the image.
+    Center  // Display image at original size, centered. Crop if larger than screen.
+}
+
 public class DoubleBufferedPanel : System.Windows.Forms.Panel
 {
     public DoubleBufferedPanel()
@@ -24,6 +34,8 @@ public class PresentationForm : Form
     private bool isPanning = false;
     private Point lastMousePosition = Point.Empty;
     private RectangleF? initialSourceRegion = null;
+    private ImageDisplayMode currentDisplayMode = ImageDisplayMode.Fit;
+    private bool isPanningAllowed = true;
 
     public PresentationForm(string imagePath, Screen targetScreen, RectangleF? initialRegion = null)
     {
@@ -131,7 +143,7 @@ public class PresentationForm : Form
 
     private void SetupInitialView()
     {
-        if (this.currentImage == null || this.displayPanel == null || this.displayPanel.ClientSize.Width == 0 || this.displayPanel.ClientSize.Height == 0)
+        if (this.currentImage == null || this.displayPanel.ClientSize.Width == 0 || this.displayPanel.ClientSize.Height == 0)
         {
             this.currentZoom = 1.0f;
             if (this.zoomSlider != null) this.zoomSlider.Value = 100;
@@ -140,58 +152,83 @@ public class PresentationForm : Form
             return;
         }
 
-        if (this.initialSourceRegion.HasValue && this.initialSourceRegion.Value.Width > 0 && this.initialSourceRegion.Value.Height > 0)
+        float panelWidth = this.displayPanel.ClientSize.Width;
+        float panelHeight = this.displayPanel.ClientSize.Height;
+
+        switch (this.currentDisplayMode)
         {
-            RectangleF region = this.initialSourceRegion.Value;
+            case ImageDisplayMode.Fit:
+                if (this.initialSourceRegion.HasValue && this.initialSourceRegion.Value.Width > 0 && this.initialSourceRegion.Value.Height > 0)
+                {
+                    RectangleF region = this.initialSourceRegion.Value;
+                    float zoomXRegion = panelWidth / region.Width;
+                    float zoomYRegion = panelHeight / region.Height;
+                    this.currentZoom = Math.Min(zoomXRegion, zoomYRegion);
+                    this.currentPan = new PointF(region.X, region.Y);
+                }
+                else
+                {
+                    float zoomXFull = panelWidth / this.currentImage.Width;
+                    float zoomYFull = panelHeight / this.currentImage.Height;
+                    this.currentZoom = Math.Min(zoomXFull, zoomYFull);
+                    this.currentPan.X = (this.currentImage.Width / 2.0f) - (panelWidth / this.currentZoom / 2.0f);
+                    this.currentPan.Y = (this.currentImage.Height / 2.0f) - (panelHeight / this.currentZoom / 2.0f);
+                }
+                break;
 
-            // Calculate zoom to fit the selected region within the panel
-            float zoomX = (float)this.displayPanel.ClientSize.Width / region.Width;
-            float zoomY = (float)this.displayPanel.ClientSize.Height / region.Height;
-            this.currentZoom = Math.Min(zoomX, zoomY);
+            case ImageDisplayMode.Fill:
+                float arImg = (float)this.currentImage.Width / this.currentImage.Height;
+                float arPanel = panelWidth / panelHeight;
+                if (arImg > arPanel)
+                {
+                    this.currentZoom = panelHeight / this.currentImage.Height;
+                }
+                else
+                {
+                    this.currentZoom = panelWidth / this.currentImage.Width;
+                }
+                this.currentPan.X = (this.currentImage.Width / 2.0f) - (panelWidth / this.currentZoom / 2.0f);
+                this.currentPan.Y = (this.currentImage.Height / 2.0f) - (panelHeight / this.currentZoom / 2.0f);
+                break;
 
-            // Set pan to the top-left of the selected region
-            this.currentPan = new PointF(region.X, region.Y);
+            case ImageDisplayMode.Stretch:
+            case ImageDisplayMode.Tile:
+                this.currentZoom = 1.0f;
+                this.currentPan = PointF.Empty;
+                break;
+
+            case ImageDisplayMode.Center:
+                this.currentZoom = 1.0f;
+                this.currentPan.X = (this.currentImage.Width / 2.0f) - (panelWidth / this.currentZoom / 2.0f);
+                this.currentPan.Y = (this.currentImage.Height / 2.0f) - (panelHeight / this.currentZoom / 2.0f);
+                break;
         }
-        else
-        {
-            // Fallback: Fit entire image if no valid region is provided
-            float zoomX = (float)this.displayPanel.ClientSize.Width / this.currentImage.Width;
-            float zoomY = (float)this.displayPanel.ClientSize.Height / this.currentImage.Height;
-            this.currentZoom = Math.Min(zoomX, zoomY);
 
-            // Center the full image
-            this.currentPan.X = (this.currentImage.Width / 2.0f) - (this.displayPanel.ClientSize.Width / this.currentZoom / 2.0f);
-            this.currentPan.Y = (this.currentImage.Height / 2.0f) - (this.displayPanel.ClientSize.Height / this.currentZoom / 2.0f);
-        }
-
-        // Update slider and re-clamp currentZoom based on slider limits
-        if (this.zoomSlider != null) // Ensure slider is initialized
+        if (this.zoomSlider != null)
         {
-            // Temporarily unsubscribe from the Scroll event
-            this.zoomSlider.Scroll -= new System.EventHandler(this.zoomSlider_Scroll);
+            this.zoomSlider.Scroll -= this.zoomSlider_Scroll;
 
             int newSliderValue = (int)(this.currentZoom * 100);
             if (newSliderValue < this.zoomSlider.Minimum) newSliderValue = this.zoomSlider.Minimum;
             if (newSliderValue > this.zoomSlider.Maximum) newSliderValue = this.zoomSlider.Maximum;
-
             this.zoomSlider.Value = newSliderValue;
-
-            // Re-confirm currentZoom from the actual slider value (potentially clamped)
             this.currentZoom = this.zoomSlider.Value / 100.0f;
-            if(this.currentZoom <= 0) this.currentZoom = 0.01f; // Prevent zero or negative zoom
+            if (this.currentZoom <= 0) this.currentZoom = 0.01f;
 
-            // Re-subscribe to the Scroll event
-            this.zoomSlider.Scroll += new System.EventHandler(this.zoomSlider_Scroll);
+            this.zoomSlider.Scroll += this.zoomSlider_Scroll;
         }
         else
         {
-            // Ensure zoom is valid even if slider isn't ready (e.g. during very early init)
-            if(this.currentZoom <= 0) this.currentZoom = 0.01f;
+            if (this.currentZoom <= 0) this.currentZoom = 0.01f;
         }
 
-        ApplyPanBoundaries();
+        if (this.currentDisplayMode == ImageDisplayMode.Fit || this.currentDisplayMode == ImageDisplayMode.Fill)
+        {
+            ApplyPanBoundaries();
+        }
 
         if (this.displayPanel != null) this.displayPanel.Invalidate();
+        this.initialSourceRegion = null;
     }
 
     private void zoomSlider_Scroll(object sender, EventArgs e)
@@ -239,53 +276,72 @@ public class PresentationForm : Form
 
     private void displayPanel_Paint(object sender, PaintEventArgs e)
     {
-        e.Graphics.Clear(Color.Black);
-        if (this.currentImage == null || this.currentZoom <= 0 || this.displayPanel.ClientSize.Width == 0 || this.displayPanel.ClientSize.Height == 0)
+        if (this.currentImage == null)
         {
+            e.Graphics.Clear(Color.Black);
             return;
         }
 
-        e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+        e.Graphics.Clear(Color.Black);
+        e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic; // Default, can be changed per mode
 
-        float srcRectX = this.currentPan.X;
-        float srcRectY = this.currentPan.Y;
-        float srcRectWidth = this.displayPanel.ClientSize.Width / this.currentZoom;
-        float srcRectHeight = this.displayPanel.ClientSize.Height / this.currentZoom;
-
-        RectangleF srcRect = new RectangleF(srcRectX, srcRectY, srcRectWidth, srcRectHeight);
-
-        // Boundary checks for srcRect relative to the image dimensions
-        srcRect.X = Math.Max(0f, srcRect.X);
-        srcRect.Y = Math.Max(0f, srcRect.Y);
-
-        if (srcRect.X + srcRect.Width > this.currentImage.Width)
+        switch (this.currentDisplayMode)
         {
-            srcRect.Width = this.currentImage.Width - srcRect.X;
-        }
-        if (srcRect.Y + srcRect.Height > this.currentImage.Height)
-        {
-            srcRect.Height = this.currentImage.Height - srcRect.Y;
-        }
+            case ImageDisplayMode.Fit:
+            case ImageDisplayMode.Fill:
+                if (this.currentZoom <= 0) { return; }
+                RectangleF srcRect = new RectangleF(
+                    this.currentPan.X,
+                    this.currentPan.Y,
+                    this.displayPanel.ClientSize.Width / this.currentZoom,
+                    this.displayPanel.ClientSize.Height / this.currentZoom
+                );
 
-        // Ensure width and height are not negative after adjustments
-        if (srcRect.Width < 0) srcRect.Width = 0;
-        if (srcRect.Height < 0) srcRect.Height = 0;
+                srcRect.X = Math.Max(0f, srcRect.X);
+                srcRect.Y = Math.Max(0f, srcRect.Y);
+                if (srcRect.X + srcRect.Width > this.currentImage.Width) srcRect.Width = this.currentImage.Width - srcRect.X;
+                if (srcRect.Y + srcRect.Height > this.currentImage.Height) srcRect.Height = this.currentImage.Height - srcRect.Y;
+                if (srcRect.Width < 0) srcRect.Width = 0;
+                if (srcRect.Height < 0) srcRect.Height = 0;
 
+                if (srcRect.Width > 0 && srcRect.Height > 0)
+                {
+                     Rectangle destRect = new Rectangle(0, 0, this.displayPanel.ClientSize.Width, this.displayPanel.ClientSize.Height);
+                     e.Graphics.DrawImage(this.currentImage, destRect, srcRect, GraphicsUnit.Pixel);
+                }
+                break;
 
-        if (srcRect.Width > 0 && srcRect.Height > 0)
-        {
-            Rectangle destRect = new Rectangle(0, 0, this.displayPanel.ClientSize.Width, this.displayPanel.ClientSize.Height);
-            e.Graphics.DrawImage(this.currentImage, destRect, srcRect, GraphicsUnit.Pixel);
+            case ImageDisplayMode.Stretch:
+                e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Default;
+                e.Graphics.DrawImage(this.currentImage, this.displayPanel.ClientRectangle);
+                break;
+
+            case ImageDisplayMode.Tile:
+                using (System.Drawing.TextureBrush textureBrush = new System.Drawing.TextureBrush(this.currentImage, System.Drawing.Drawing2D.WrapMode.Tile))
+                {
+                    e.Graphics.FillRectangle(textureBrush, this.displayPanel.ClientRectangle);
+                }
+                break;
+
+            case ImageDisplayMode.Center:
+                float destX = (this.displayPanel.ClientSize.Width - this.currentImage.Width) / 2.0f;
+                float destY = (this.displayPanel.ClientSize.Height - this.currentImage.Height) / 2.0f;
+                RectangleF srcCenterRect = new RectangleF(0, 0, this.currentImage.Width, this.currentImage.Height);
+                RectangleF destCenterRect = new RectangleF(destX, destY, this.currentImage.Width, this.currentImage.Height);
+                e.Graphics.DrawImage(this.currentImage, destCenterRect, srcCenterRect, GraphicsUnit.Pixel);
+                break;
         }
     }
 
     private void displayPanel_MouseDown(object sender, MouseEventArgs e)
     {
+        if (!this.isPanningAllowed) return; // Check if panning is allowed
+
         if (e.Button == MouseButtons.Left)
         {
             this.isPanning = true;
             this.lastMousePosition = e.Location;
-            this.displayPanel.Cursor = Cursors.Hand; // Optional: change cursor
+            if (this.displayPanel != null) this.displayPanel.Cursor = Cursors.Hand;
         }
     }
 
@@ -384,6 +440,32 @@ public class PresentationForm : Form
         SetupInitialView(); // Call this to set zoom/pan for the new image
 
         this.Activate();
+    }
+
+    public void SetDisplayMode(ImageDisplayMode newMode)
+    {
+        this.currentDisplayMode = newMode;
+
+        switch (this.currentDisplayMode)
+        {
+            case ImageDisplayMode.Fit:
+            case ImageDisplayMode.Fill:
+                if (this.zoomSlider != null) this.zoomSlider.Enabled = true;
+                this.isPanningAllowed = true;
+                // Optional: Change cursor back to default if it was something else
+                if (this.displayPanel != null) this.displayPanel.Cursor = Cursors.Default;
+                break;
+
+            case ImageDisplayMode.Stretch:
+            case ImageDisplayMode.Tile:
+            case ImageDisplayMode.Center:
+                if (this.zoomSlider != null) this.zoomSlider.Enabled = false;
+                this.isPanningAllowed = false;
+                // Optional: Change cursor if panning is disabled (e.g., default)
+                if (this.displayPanel != null) this.displayPanel.Cursor = Cursors.Default;
+                break;
+        }
+        SetupInitialView(); // This will trigger a repaint via its own Invalidate call.
     }
 
     private void ApplyPanBoundaries()

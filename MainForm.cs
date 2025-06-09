@@ -18,6 +18,7 @@ namespace DreamsLive_Solutions_PresenterApp1
         private Rectangle selectionRectangle = Rectangle.Empty;
         private Point selectionStartPoint = Point.Empty;
         private bool isSelecting = false;
+        private ComboBox cmbDisplayMode;
         public MainForm()
         {
             InitializeComponent();
@@ -29,7 +30,93 @@ namespace DreamsLive_Solutions_PresenterApp1
                 this.picPreview.MouseUp += new System.Windows.Forms.MouseEventHandler(this.picPreview_MouseUp);
                 this.picPreview.Paint += new System.Windows.Forms.PaintEventHandler(this.picPreview_Paint);
             }
+
+            // Initialize DisplayMode ComboBox
+            this.cmbDisplayMode = new ComboBox();
+            this.cmbDisplayMode.Name = "cmbDisplayMode";
+            this.cmbDisplayMode.DropDownStyle = ComboBoxStyle.DropDownList; // User can't type new values
+
+            // Add items (string representations of the enum values)
+            this.cmbDisplayMode.Items.AddRange(new object[] {
+                "Fit",
+                "Fill",
+                "Stretch",
+                "Tile",
+                "Center"
+            });
+            this.cmbDisplayMode.SelectedItem = "Fit"; // Default selection
+
+            // Positioning (example: place it below cmbDisplays)
+            // This requires cmbDisplays to be accessible via this.cmbDisplays.
+            // Ensure cmbDisplays is made accessible if it's designer-generated (e.g. change private to internal or public, or provide a getter).
+            // For this example, we'll assume it becomes accessible or use fallback.
+            // Note: Accessing other controls like 'this.cmbDisplays' directly might fail if they are private
+            // and defined only in Designer.cs without being exposed.
+            // A more robust way would be to find the control by name if necessary, or ensure its accessibility.
+            Control cmbDisplaysControl = this.Controls.Find("cmbDisplays", true).FirstOrDefault(); // Attempt to find by name
+
+            if (cmbDisplaysControl != null)
+            {
+                this.cmbDisplayMode.Location = new Point(cmbDisplaysControl.Location.X,
+                                                         cmbDisplaysControl.Location.Y + cmbDisplaysControl.Height + 6); // 6px spacing
+                this.cmbDisplayMode.Size = cmbDisplaysControl.Size; // Same size as cmbDisplays
+            }
+            else // Fallback positioning if cmbDisplays isn't found as expected
+            {
+                // These fallback coordinates might need adjustment based on your form layout.
+                // Consider where lblSelectedDisplay (label for cmbDisplays) is to align.
+                // Let's try to find lblSelectedDisplay for better relative positioning.
+                Control lblSelectedDisplayControl = this.Controls.Find("lblSelectedDisplay", true).FirstOrDefault();
+                if (lblSelectedDisplayControl != null)
+                {
+                     this.cmbDisplayMode.Location = new Point(lblSelectedDisplayControl.Location.X,
+                                                             lblSelectedDisplayControl.Location.Y + lblSelectedDisplayControl.Height + 26); // More space after label
+                }
+                else // Absolute fallback
+                {
+                    this.cmbDisplayMode.Location = new Point(15, 80); // Adjust as needed if no other refs
+                }
+                this.cmbDisplayMode.Size = new Size(121, 21);     // Example fallback size, should match cmbDisplays if possible
+            }
+
+            // Set TabIndex based on other controls. This is a rough guess.
+            // It's better to set this in the designer or more carefully in code.
+            if (this.btnStartPresentation != null)
+            {
+                 this.cmbDisplayMode.TabIndex = this.btnStartPresentation.TabIndex + 1;
+            }
+            else
+            {
+                this.cmbDisplayMode.TabIndex = 5; // Arbitrary fallback
+            }
+
+            // Add to form's controls
+            this.Controls.Add(this.cmbDisplayMode);
+
+            // Subscribe to SelectedIndexChanged event
+            this.cmbDisplayMode.SelectedIndexChanged += new System.EventHandler(this.cmbDisplayMode_SelectedIndexChanged);
         }
+
+        private void cmbDisplayMode_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (this.activePresentationForm != null && !this.activePresentationForm.IsDisposed)
+            {
+                string selectedModeString = this.cmbDisplayMode.SelectedItem as string;
+                if (selectedModeString != null)
+                {
+                    try
+                    {
+                        ImageDisplayMode selectedMode = (ImageDisplayMode)Enum.Parse(typeof(ImageDisplayMode), selectedModeString);
+                        this.activePresentationForm.SetDisplayMode(selectedMode);
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        Console.WriteLine("Error parsing display mode: " + ex.Message);
+                    }
+                }
+            }
+        }
+
         public class DisplayItem
         {
             public string Name { get; set; }
@@ -187,6 +274,19 @@ namespace DreamsLive_Solutions_PresenterApp1
             {
                 // If it exists and is not disposed, update its image
                 activePresentationForm.UpdateImage(selectedImagePath, selectedRegionInImageCoords);
+
+                // Ensure the latest display mode from ComboBox is applied
+                string currentModeString = this.cmbDisplayMode.SelectedItem as string;
+                if (currentModeString != null)
+                {
+                    try
+                    {
+                        ImageDisplayMode currentMode = (ImageDisplayMode)Enum.Parse(typeof(ImageDisplayMode), currentModeString);
+                        activePresentationForm.SetDisplayMode(currentMode);
+                    }
+                    catch (ArgumentException ex) { Console.WriteLine("Error parsing current display mode: " + ex.Message); }
+                }
+
                 if (activePresentationForm.WindowState == FormWindowState.Minimized)
                 {
                     activePresentationForm.WindowState = FormWindowState.Normal;
@@ -196,22 +296,26 @@ namespace DreamsLive_Solutions_PresenterApp1
             else
             {
                 // Otherwise, create a new presentation form
-                // Consider disabling the start button or main form here to prevent multiple presentations
-                // For example: btnStartPresentation.Enabled = false;
-                // You might want to add logic to prevent multiple PresentationForms from opening
-                // or to manage the state of the btnStartPresentation button.
-
                 activePresentationForm = new PresentationForm(selectedImagePath, targetScreen, selectedRegionInImageCoords);
                 activePresentationForm.FormClosed += (s, args) => {
-                    // Re-enable start button or main form when presentation is closed
-                    // For example: btnStartPresentation.Enabled = true;
-                    // Consider re-enabling based on application logic
-                    if (s == activePresentationForm) // Check if the closed form is the active one
+                    if (s == activePresentationForm)
                     {
                         activePresentationForm = null;
                     }
                 };
-                activePresentationForm.Show(); // Show non-modally
+
+                // Set initial display mode before showing
+                string initialModeString = this.cmbDisplayMode.SelectedItem as string;
+                if (initialModeString != null)
+                {
+                    try
+                    {
+                        ImageDisplayMode initialMode = (ImageDisplayMode)Enum.Parse(typeof(ImageDisplayMode), initialModeString);
+                        activePresentationForm.SetDisplayMode(initialMode);
+                    }
+                    catch (ArgumentException ex) { Console.WriteLine("Error parsing initial display mode: " + ex.Message); }
+                }
+                activePresentationForm.Show();
             }
         }
 
