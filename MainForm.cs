@@ -275,17 +275,9 @@ namespace DreamsLive_Solutions_PresenterApp1
                 // If it exists and is not disposed, update its image
                 activePresentationForm.UpdateImage(selectedImagePath, selectedRegionInImageCoords);
 
-                // Ensure the latest display mode from ComboBox is applied
-                string currentModeString = this.cmbDisplayMode.SelectedItem as string;
-                if (currentModeString != null)
-                {
-                    try
-                    {
-                        ImageDisplayMode currentMode = (ImageDisplayMode)Enum.Parse(typeof(ImageDisplayMode), currentModeString);
-                        activePresentationForm.SetDisplayMode(currentMode);
-                    }
-                    catch (ArgumentException ex) { Console.WriteLine("Error parsing current display mode: " + ex.Message); }
-                }
+                // The SetDisplayMode call was removed from here.
+                // activePresentationForm.UpdateImage calls SetupInitialView, which uses PresentationForm's currentDisplayMode.
+                // PresentationForm's currentDisplayMode is kept in sync by cmbDisplayMode_SelectedIndexChanged.
 
                 if (activePresentationForm.WindowState == FormWindowState.Minimized)
                 {
@@ -412,7 +404,7 @@ namespace DreamsLive_Solutions_PresenterApp1
                 {
                     this.selectionRectangle = Rectangle.Empty; // Discard very small selections
                 }
-                this.picPreview.Invalidate(); // Request repaint for final state
+                this.picPreview.Invalidate(); // Request repaint for final state of selection on picPreview
             }
         }
 
