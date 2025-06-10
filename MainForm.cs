@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
+using System.Text.Json; // For JsonSerializer
 
 namespace DreamsLive_Solutions_PresenterApp1
 {
@@ -19,6 +20,8 @@ namespace DreamsLive_Solutions_PresenterApp1
         private Point selectionStartPoint = Point.Empty;
         private bool isSelecting = false;
         private ComboBox cmbDisplayMode;
+        private Dictionary<string, RectangleF> imageRegionStore;
+        private string regionStoreFilePath;
         public MainForm()
         {
             InitializeComponent();
@@ -98,6 +101,32 @@ namespace DreamsLive_Solutions_PresenterApp1
 
             // Subscribe to SelectedIndexChanged event
             this.cmbDisplayMode.SelectedIndexChanged += new System.EventHandler(this.cmbDisplayMode_SelectedIndexChanged);
+
+            try
+            {
+                // Define a folder for your application within ApplicationData
+                string appDataFolder = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string yourAppFolder = Path.Combine(appDataFolder, "DreamsLivePresenterApp"); // Or your specific app name
+
+                // Create the directory if it doesn't exist
+                if (!Directory.Exists(yourAppFolder))
+                {
+                    Directory.CreateDirectory(yourAppFolder);
+                }
+
+                this.regionStoreFilePath = Path.Combine(yourAppFolder, "image_regions.json");
+            }
+            catch (Exception ex)
+            {
+                // Handle potential errors creating directory or getting path (e.g., log it, inform user, or fallback)
+                Console.WriteLine($"Error setting up region store path: {ex.Message}");
+                // Fallback path if needed, though ApplicationData is usually writable.
+                // For example, use application's local directory:
+                // this.regionStoreFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "image_regions.json");
+                // Or disable the feature if path setup fails. For now, just log and continue.
+                // A MessageBox could also be shown here.
+                this.regionStoreFilePath = null; // Indicate failure to set up path
+            }
         }
 
         private void cmbDisplayMode_SelectedIndexChanged(object sender, EventArgs e)
@@ -160,6 +189,28 @@ namespace DreamsLive_Solutions_PresenterApp1
                                 picPreview.Image.Dispose();
                             }
                             picPreview.Image = Image.FromFile(selectedImagePath);
+
+                            // ---- START: Apply saved region logic ----
+                            if (this.imageRegionStore != null && !string.IsNullOrEmpty(this.selectedImagePath) && this.imageRegionStore.ContainsKey(this.selectedImagePath))
+                            {
+                                RectangleF savedRegionInImageCoords = this.imageRegionStore[this.selectedImagePath];
+                                Rectangle? regionInPreviewCoords = ConvertImageRegionToPreviewCoords(savedRegionInImageCoords, this.picPreview.Image, this.picPreview.ClientRectangle);
+
+                                if (regionInPreviewCoords.HasValue)
+                                {
+                                    this.selectionRectangle = regionInPreviewCoords.Value;
+                                }
+                                else
+                                {
+                                    this.selectionRectangle = Rectangle.Empty; // Failed to convert, so no selection
+                                }
+                            }
+                            else
+                            {
+                                this.selectionRectangle = Rectangle.Empty;
+                            }
+                            this.picPreview.Invalidate();
+                            // ---- END: Apply saved region logic ----
                         }
                     }
                     catch (Exception ex)
@@ -183,8 +234,50 @@ namespace DreamsLive_Solutions_PresenterApp1
 
         private void MainForm_Load(object sender, EventArgs e)
         {
+            PopulateDisplayComboBox(); // Existing call
 
-            PopulateDisplayComboBox();
+            // Load saved image regions
+            if (string.IsNullOrEmpty(this.regionStoreFilePath))
+            {
+                // Path wasn't set up correctly, so can't load.
+                // Initialize to an empty dictionary to prevent null reference errors later.
+                this.imageRegionStore = new Dictionary<string, RectangleF>();
+                Console.WriteLine("Region store file path is not configured. Skipping load.");
+                return;
+            }
+
+            if (File.Exists(this.regionStoreFilePath))
+            {
+                try
+                {
+                    string jsonContent = File.ReadAllText(this.regionStoreFilePath);
+                    // Requires System.Text.Json or Newtonsoft.Json.
+                    // Assuming System.Text.Json for this example.
+                    // Add: using System.Text.Json;
+                    this.imageRegionStore = JsonSerializer.Deserialize<Dictionary<string, RectangleF>>(jsonContent);
+
+                    if (this.imageRegionStore == null) // Deserialization might return null for empty/invalid JSON
+                    {
+                        this.imageRegionStore = new Dictionary<string, RectangleF>();
+                    }
+                }
+                catch (JsonException jsonEx)
+                {
+                    Console.WriteLine($"Error deserializing image regions: {jsonEx.Message}. Starting with empty store.");
+                    this.imageRegionStore = new Dictionary<string, RectangleF>();
+                    // Optional: Notify user, or backup/delete the corrupted file.
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error loading image regions file: {ex.Message}. Starting with empty store.");
+                    this.imageRegionStore = new Dictionary<string, RectangleF>();
+                }
+            }
+            else
+            {
+                // File doesn't exist, so initialize with an empty dictionary.
+                this.imageRegionStore = new Dictionary<string, RectangleF>();
+            }
         }
         private void PopulateDisplayComboBox()
         {
@@ -401,13 +494,49 @@ namespace DreamsLive_Solutions_PresenterApp1
             if (this.isSelecting && this.picPreview.Image != null)
             {
                 this.isSelecting = false;
-                // Optional: Finalize selectionRectangle based on e.Location (already done by MouseMove)
-                // Optional: Check for minimal size
+                bool selectionWasCleared = false; // Declare and initialize here
+
                 if (this.selectionRectangle.Width < 5 || this.selectionRectangle.Height < 5)
                 {
-                    this.selectionRectangle = Rectangle.Empty; // Discard very small selections
+                    this.selectionRectangle = Rectangle.Empty;
+                    selectionWasCleared = true;
                 }
-                this.picPreview.Invalidate(); // Request repaint for final state of selection on picPreview
+
+                this.picPreview.Invalidate();
+
+                // ---- START: Save/Update Region Logic ----
+                if (this.imageRegionStore == null)
+                {
+                    this.imageRegionStore = new Dictionary<string, RectangleF>();
+                }
+
+                if (!string.IsNullOrEmpty(this.selectedImagePath))
+                {
+                    if (!selectionWasCleared && this.selectionRectangle != Rectangle.Empty)
+                    {
+                        RectangleF? regionInImageCoords = GetSelectedRegionInImageCoordinates();
+
+                        if (regionInImageCoords.HasValue)
+                        {
+                            this.imageRegionStore[this.selectedImagePath] = regionInImageCoords.Value;
+                            SaveImageRegions();
+                        }
+                        else if (this.imageRegionStore.ContainsKey(this.selectedImagePath))
+                        {
+                            this.imageRegionStore.Remove(this.selectedImagePath);
+                            SaveImageRegions();
+                        }
+                    }
+                    else
+                    {
+                        if (this.imageRegionStore.ContainsKey(this.selectedImagePath))
+                        {
+                            this.imageRegionStore.Remove(this.selectedImagePath);
+                            SaveImageRegions();
+                        }
+                    }
+                }
+                // ---- END: Save/Update Region Logic ----
             }
         }
 
@@ -499,6 +628,90 @@ namespace DreamsLive_Solutions_PresenterApp1
             return new RectangleF(originalX, originalY, originalWidth, originalHeight);
         }
 
+        private void SaveImageRegions()
+        {
+            if (string.IsNullOrEmpty(this.regionStoreFilePath))
+            {
+                Console.WriteLine("Region store file path is not configured. Skipping save.");
+                return;
+            }
+
+            if (this.imageRegionStore == null)
+            {
+                Console.WriteLine("Image region store is null. Skipping save.");
+                // This shouldn't happen if MainForm_Load always initializes it.
+                return;
+            }
+
+            try
+            {
+                // Configure JsonSerializerOptions for indented JSON for readability (optional)
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                string jsonContent = JsonSerializer.Serialize(this.imageRegionStore, options);
+                File.WriteAllText(this.regionStoreFilePath, jsonContent);
+            }
+            catch (JsonException jsonEx)
+            {
+                Console.WriteLine($"Error serializing image regions: {jsonEx.Message}");
+                // Optional: Notify user
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error saving image regions file: {ex.Message}");
+                // Optional: Notify user
+            }
+        }
+
+        private Rectangle? ConvertImageRegionToPreviewCoords(RectangleF imageRegion, Image currentPreviewImage, Rectangle picPreviewClientBounds)
+        {
+            if (currentPreviewImage == null || picPreviewClientBounds.Width == 0 || picPreviewClientBounds.Height == 0)
+            {
+                return null; // Cannot perform conversion without image or valid preview bounds
+            }
+
+            // Calculate scaling factor of the displayed image within picPreview (assuming PictureBoxSizeMode.Zoom)
+            float imgAspectRatio = (float)currentPreviewImage.Width / currentPreviewImage.Height;
+            float picBoxAspectRatio = (float)picPreviewClientBounds.Width / picPreviewClientBounds.Height;
+
+            float scaleFactor;
+            if (imgAspectRatio > picBoxAspectRatio) // Image is wider relative to PictureBox (letterboxed)
+            {
+                scaleFactor = (float)picPreviewClientBounds.Width / currentPreviewImage.Width;
+            }
+            else // Image is taller relative to PictureBox (pillarboxed)
+            {
+                scaleFactor = (float)picPreviewClientBounds.Height / currentPreviewImage.Height;
+            }
+
+            if (scaleFactor <= 0) // Should not happen with valid inputs but good for safety
+            {
+                return null;
+            }
+
+            // Calculate the size of the displayed image within picPreview
+            float displayedImageWidth = currentPreviewImage.Width * scaleFactor;
+            float displayedImageHeight = currentPreviewImage.Height * scaleFactor;
+
+            // Calculate the offsets (padding) of the displayed image within picPreview
+            float offsetX = (picPreviewClientBounds.Width - displayedImageWidth) / 2.0f;
+            float offsetY = (picPreviewClientBounds.Height - displayedImageHeight) / 2.0f;
+
+            // Convert imageRegion (in original image coordinates) to picPreview client coordinates
+            float previewX = (imageRegion.X * scaleFactor) + offsetX;
+            float previewY = (imageRegion.Y * scaleFactor) + offsetY;
+            float previewWidth = imageRegion.Width * scaleFactor;
+            float previewHeight = imageRegion.Height * scaleFactor;
+
+            // Create the rectangle in preview coordinates.
+            // It's possible the saved region, when mapped to current preview, might be partially
+            // or fully outside the visible image area in the preview, but we should still return
+            // its calculated position and size. Clamping might be done by selection drawing logic if needed.
+            return new Rectangle((int)Math.Round(previewX),
+                                 (int)Math.Round(previewY),
+                                 (int)Math.Round(previewWidth),
+                                 (int)Math.Round(previewHeight));
+        }
+
         private void picPreview_DragEnter(object sender, DragEventArgs e)
         {
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
@@ -548,6 +761,28 @@ namespace DreamsLive_Solutions_PresenterApp1
                                 this.picPreview.Image = null; // Set to null before loading new one
                             }
                             this.picPreview.Image = Image.FromFile(filePath);
+
+                            // ---- START: Apply saved region logic ----
+                            if (this.imageRegionStore != null && !string.IsNullOrEmpty(this.selectedImagePath) && this.imageRegionStore.ContainsKey(this.selectedImagePath))
+                            {
+                                RectangleF savedRegionInImageCoords = this.imageRegionStore[this.selectedImagePath];
+                                Rectangle? regionInPreviewCoords = ConvertImageRegionToPreviewCoords(savedRegionInImageCoords, this.picPreview.Image, this.picPreview.ClientRectangle);
+
+                                if (regionInPreviewCoords.HasValue)
+                                {
+                                    this.selectionRectangle = regionInPreviewCoords.Value;
+                                }
+                                else
+                                {
+                                    this.selectionRectangle = Rectangle.Empty;
+                                }
+                            }
+                            else
+                            {
+                                this.selectionRectangle = Rectangle.Empty; // Explicitly ensure it's clear
+                            }
+                            this.picPreview.Invalidate(); // Ensure picPreview_Paint runs with new selectionRectangle
+                            // ---- END: Apply saved region logic ----
                         }
                     }
                     catch (Exception ex)
