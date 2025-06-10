@@ -29,6 +29,9 @@ namespace DreamsLive_Solutions_PresenterApp1
                 this.picPreview.MouseMove += new System.Windows.Forms.MouseEventHandler(this.picPreview_MouseMove);
                 this.picPreview.MouseUp += new System.Windows.Forms.MouseEventHandler(this.picPreview_MouseUp);
                 this.picPreview.Paint += new System.Windows.Forms.PaintEventHandler(this.picPreview_Paint);
+                this.picPreview.AllowDrop = true; // Enable AllowDrop
+                this.picPreview.DragEnter += new System.Windows.Forms.DragEventHandler(this.picPreview_DragEnter);
+                this.picPreview.DragDrop += new System.Windows.Forms.DragEventHandler(this.picPreview_DragDrop);
             }
 
             // Initialize DisplayMode ComboBox
@@ -494,6 +497,79 @@ namespace DreamsLive_Solutions_PresenterApp1
             }
 
             return new RectangleF(originalX, originalY, originalWidth, originalHeight);
+        }
+
+        private void picPreview_DragEnter(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                // Check if any of the files are of a supported image type (optional but good UX)
+                // For simplicity in this step, we'll just allow any file drop and validate in DragDrop.
+                // A more advanced version would iterate through (string[])e.Data.GetData(DataFormats.FileDrop)
+                // and check extensions.
+                e.Effect = DragDropEffects.Copy; // Show copy cursor
+            }
+            else
+            {
+                e.Effect = DragDropEffects.None; // Show "not allowed" cursor
+            }
+        }
+
+        private void picPreview_DragDrop(object sender, DragEventArgs e)
+        {
+            string[] files = e.Data.GetData(DataFormats.FileDrop) as string[];
+
+            if (files != null && files.Length > 0)
+            {
+                string filePath = files[0]; // Take the first file if multiple are dropped
+
+                // Basic check for common image file extensions
+                string ext = Path.GetExtension(filePath).ToLowerInvariant();
+                if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".gif")
+                {
+                    // Clear any existing selection rectangle from picPreview
+                    this.selectionRectangle = Rectangle.Empty;
+                    this.isSelecting = false;
+                    // Invalidate picPreview to clear visual selection before new image loads or if it fails
+                    if (this.picPreview != null) this.picPreview.Invalidate();
+
+                    try
+                    {
+                        // This logic is similar to tnBrowse_Click
+                        this.selectedImagePath = filePath;
+                        this.lblImagePath.Text = "Selected Image: " + this.selectedImagePath;
+
+                        if (this.picPreview != null)
+                        {
+                            // Dispose previous image if any
+                            if (this.picPreview.Image != null)
+                            {
+                                this.picPreview.Image.Dispose();
+                                this.picPreview.Image = null; // Set to null before loading new one
+                            }
+                            this.picPreview.Image = Image.FromFile(filePath);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Error loading dragged image: " + ex.Message, "Image Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        this.selectedImagePath = null;
+                        this.lblImagePath.Text = "Selected Image: None";
+                        if (this.picPreview != null && this.picPreview.Image != null)
+                        {
+                            this.picPreview.Image.Dispose();
+                            this.picPreview.Image = null;
+                        }
+                        // Ensure selection is also cleared if image load fails after drag-drop
+                        this.selectionRectangle = Rectangle.Empty;
+                        if (this.picPreview != null) this.picPreview.Invalidate();
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("Please drop a valid image file (e.g., JPG, PNG, BMP, GIF).", "Invalid File Type", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
         }
     }
 }
