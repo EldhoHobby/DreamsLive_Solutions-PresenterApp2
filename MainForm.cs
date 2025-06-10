@@ -329,5 +329,179 @@ namespace DreamsLive_Solutions_PresenterApp1
         // using System.Windows.Forms;
         // using System.Drawing;
         // using System.IO;
+
+        private void picPreview_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left && this.picPreview.Image != null)
+            {
+                this.isSelecting = true;
+                this.selectionStartPoint = e.Location; // e.Location is relative to picPreview
+                this.selectionRectangle = Rectangle.Empty; // Clear previous selection
+                this.picPreview.Invalidate(); // Request repaint to clear old rectangle visual
+            }
+        }
+
+        private void picPreview_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (this.isSelecting && this.picPreview.Image != null)
+            {
+                Point currentMousePosition = e.Location;
+                int rawX = Math.Min(this.selectionStartPoint.X, currentMousePosition.X);
+                int rawY = Math.Min(this.selectionStartPoint.Y, currentMousePosition.Y);
+                int rawWidth = Math.Abs(this.selectionStartPoint.X - currentMousePosition.X);
+                int rawHeight = Math.Abs(this.selectionStartPoint.Y - currentMousePosition.Y);
+
+                if (rawWidth == 0 || rawHeight == 0) // Avoid division by zero or no actual drag
+                {
+                    this.selectionRectangle = new Rectangle(rawX, rawY, rawWidth, rawHeight);
+                    this.picPreview.Invalidate();
+                    return;
+                }
+
+                double targetAspectRatio = 0;
+                DisplayItem selectedDisplayItem = cmbDisplays.SelectedItem as DisplayItem;
+
+                if (selectedDisplayItem != null && selectedDisplayItem.DisplayScreen != null)
+                {
+                    Screen targetScreen = selectedDisplayItem.DisplayScreen;
+                    if (targetScreen.Bounds.Height > 0) // Avoid division by zero for aspect ratio
+                    {
+                        targetAspectRatio = (double)targetScreen.Bounds.Width / targetScreen.Bounds.Height;
+                    }
+                }
+
+                if (targetAspectRatio > 0) // If a valid aspect ratio is obtained
+                {
+                    // Adjust width or height to fit the targetAspectRatio within the raw dragged box
+                    int finalWidth = rawWidth;
+                    int finalHeight = rawHeight;
+
+                    // Calculate potential height based on rawWidth and targetAspectRatio
+                    int heightFromWidth = (int)(rawWidth / targetAspectRatio);
+                    // Calculate potential width based on rawHeight and targetAspectRatio
+                    int widthFromHeight = (int)(rawHeight * targetAspectRatio);
+
+                    if (heightFromWidth <= rawHeight)
+                    {
+                        // Width is the limiting dimension for the aspect ratio within the raw dragged box
+                        finalHeight = heightFromWidth;
+                    }
+                    else // widthFromHeight <= rawWidth (Height is the limiting dimension)
+                    {
+                        finalWidth = widthFromHeight;
+                    }
+                    this.selectionRectangle = new Rectangle(rawX, rawY, finalWidth, finalHeight);
+                }
+                else // Fallback to free-form selection if no valid target aspect ratio
+                {
+                    this.selectionRectangle = new Rectangle(rawX, rawY, rawWidth, rawHeight);
+                }
+
+                this.picPreview.Invalidate();
+            }
+        }
+
+        private void picPreview_MouseUp(object sender, MouseEventArgs e)
+        {
+            if (this.isSelecting && this.picPreview.Image != null)
+            {
+                this.isSelecting = false;
+                // Optional: Finalize selectionRectangle based on e.Location (already done by MouseMove)
+                // Optional: Check for minimal size
+                if (this.selectionRectangle.Width < 5 || this.selectionRectangle.Height < 5)
+                {
+                    this.selectionRectangle = Rectangle.Empty; // Discard very small selections
+                }
+                this.picPreview.Invalidate(); // Request repaint for final state
+            }
+        }
+
+        private void picPreview_Paint(object sender, PaintEventArgs e)
+        {
+            // The PictureBox already handles drawing its Image if assigned.
+            // We just need to draw our selection rectangle on top of it.
+            // However, if picPreview.Image is null, we shouldn't attempt to draw a selection.
+
+            if (this.picPreview.Image == null)
+            {
+                // Optional: Clear selection if image is gone
+                // this.selectionRectangle = Rectangle.Empty;
+                return;
+            }
+
+            // Draw the selection rectangle if it's not empty.
+            if (this.selectionRectangle != Rectangle.Empty)
+            {
+                // Use a semi-transparent brush for better visibility (optional)
+                // using (Brush selectionBrush = new SolidBrush(Color.FromArgb(128, 72, 145, 220))) // Example: semi-transparent blue
+                // {
+                // e.Graphics.FillRectangle(selectionBrush, this.selectionRectangle);
+                // }
+
+                // Draw a border for the rectangle
+                // Ensure Pen is disposed if created like this, or use a static Pen.
+                using (Pen selectionPen = new Pen(Color.Red, 2)) // Red border, 2px thick
+                {
+                    e.Graphics.DrawRectangle(selectionPen, this.selectionRectangle);
+                }
+            }
+        }
+
+        private RectangleF? GetSelectedRegionInImageCoordinates()
+        {
+            if (this.picPreview.Image == null || this.selectionRectangle == Rectangle.Empty || this.picPreview.ClientSize.Width == 0 || this.picPreview.ClientSize.Height == 0)
+            {
+                return null;
+            }
+
+            Image img = this.picPreview.Image;
+            Rectangle clientRect = this.picPreview.ClientRectangle; // Using ClientRectangle
+
+            float imgAspectRatio = (float)img.Width / img.Height;
+            float picBoxAspectRatio = (float)clientRect.Width / clientRect.Height;
+
+            float scaleFactor;
+            if (imgAspectRatio > picBoxAspectRatio)
+            {
+                scaleFactor = (float)clientRect.Width / img.Width;
+            }
+            else
+            {
+                scaleFactor = (float)clientRect.Height / img.Height;
+            }
+
+            if (scaleFactor <= 0) return null;
+
+            float displayedImageWidth = img.Width * scaleFactor;
+            float displayedImageHeight = img.Height * scaleFactor;
+
+            float offsetX = (clientRect.Width - displayedImageWidth) / 2.0f;
+            float offsetY = (clientRect.Height - displayedImageHeight) / 2.0f;
+
+            float selRelX = this.selectionRectangle.X - offsetX;
+            float selRelY = this.selectionRectangle.Y - offsetY;
+
+            float originalX = selRelX / scaleFactor;
+            float originalY = selRelY / scaleFactor;
+            float originalWidth = this.selectionRectangle.Width / scaleFactor;
+            float originalHeight = this.selectionRectangle.Height / scaleFactor;
+
+            // Boundary checks
+            if (originalX < 0) { originalWidth += originalX; originalX = 0; }
+            if (originalX >= img.Width) { originalX = img.Width - 1; originalWidth = 0; }
+
+            if (originalY < 0) { originalHeight += originalY; originalY = 0; }
+            if (originalY >= img.Height) { originalY = img.Height - 1; originalHeight = 0; }
+
+            if (originalX + originalWidth > img.Width) { originalWidth = img.Width - originalX; }
+            if (originalY + originalHeight > img.Height) { originalHeight = img.Height - originalY; }
+
+            if (originalWidth <= 0 || originalHeight <= 0)
+            {
+                return null;
+            }
+
+            return new RectangleF(originalX, originalY, originalWidth, originalHeight);
+        }
     }
 }

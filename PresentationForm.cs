@@ -36,6 +36,8 @@ public class PresentationForm : Form
     private RectangleF? initialSourceRegion = null;
     private ImageDisplayMode currentDisplayMode = ImageDisplayMode.Fit;
     private bool isPanningAllowed = true;
+    private bool hasLoaded = false;
+    private bool wasPanningOperation = false;
 
     public PresentationForm(string imagePath, Screen targetScreen, RectangleF? initialRegion = null)
     {
@@ -137,7 +139,8 @@ public class PresentationForm : Form
             // Ensure the form can receive keyboard input immediately after loading
             this.Activate(); // Brings the form to the foreground and activates it.
             this.Focus();    // Sets input focus to the form.
-            SetupInitialView(); // Call here
+            SetupInitialView();
+            this.hasLoaded = true; // Set flag here
         };
     }
 
@@ -204,23 +207,29 @@ public class PresentationForm : Form
                 break;
         }
 
+                break;
+        }
+
+        // Update zoomSlider UI without altering the precise this.currentZoom for THIS execution of SetupInitialView
         if (this.zoomSlider != null)
         {
-            this.zoomSlider.Scroll -= this.zoomSlider_Scroll;
+            this.zoomSlider.Scroll -= new System.EventHandler(this.zoomSlider_Scroll);
 
-            int newSliderValue = (int)(this.currentZoom * 100);
+            int newSliderValue = (int)(this.currentZoom * 100); // Use precise this.currentZoom
             if (newSliderValue < this.zoomSlider.Minimum) newSliderValue = this.zoomSlider.Minimum;
             if (newSliderValue > this.zoomSlider.Maximum) newSliderValue = this.zoomSlider.Maximum;
             this.zoomSlider.Value = newSliderValue;
-            this.currentZoom = this.zoomSlider.Value / 100.0f;
-            if (this.currentZoom <= 0) this.currentZoom = 0.01f;
 
-            this.zoomSlider.Scroll += this.zoomSlider_Scroll;
+            // CRITICAL: DO NOT DO THIS -> this.currentZoom = this.zoomSlider.Value / 100.0f;
+            // The class field this.currentZoom should retain the more precise value calculated earlier in SetupInitialView.
+            // The purpose of the temporary unhooking of the event handler is to allow updating the slider UI
+            // without the event handler immediately re-calculating currentZoom from the slider's potentially less precise value.
+
+            this.zoomSlider.Scroll += new System.EventHandler(this.zoomSlider_Scroll);
         }
-        else
-        {
-            if (this.currentZoom <= 0) this.currentZoom = 0.01f;
-        }
+
+        // Single, authoritative validation for this.currentZoom before it's used further
+        if (this.currentZoom <= 0) this.currentZoom = 0.01f;
 
         if (this.currentDisplayMode == ImageDisplayMode.Fit || this.currentDisplayMode == ImageDisplayMode.Fill)
         {
@@ -228,7 +237,7 @@ public class PresentationForm : Form
         }
 
         if (this.displayPanel != null) this.displayPanel.Invalidate();
-        this.initialSourceRegion = null;
+        this.initialSourceRegion = null; // Always consume after any SetupInitialView for a new image/load.
     }
 
     private void zoomSlider_Scroll(object sender, EventArgs e)
@@ -271,7 +280,12 @@ public class PresentationForm : Form
     // Optional: Event handler for Click event (on Panel) to also close the form
     private void PresentationForm_Click(object sender, EventArgs e)
     {
-        this.Close(); // Closes the PresentationForm
+        if (!this.wasPanningOperation) // Only close if it wasn't a pan
+        {
+            this.Close();
+        }
+        // Reset for next independent click, though MouseDown will also reset it.
+        // this.wasPanningOperation = false; // Not strictly necessary here as MouseDown handles reset.
     }
 
     private void displayPanel_Paint(object sender, PaintEventArgs e)
@@ -339,6 +353,7 @@ public class PresentationForm : Form
 
         if (e.Button == MouseButtons.Left)
         {
+            this.wasPanningOperation = false; // Reset for the new click/drag sequence
             this.isPanning = true;
             this.lastMousePosition = e.Location;
             if (this.displayPanel != null) this.displayPanel.Cursor = Cursors.Hand;
@@ -355,6 +370,11 @@ public class PresentationForm : Form
             // Panning needs to be scaled inversely to zoom for intuitive movement.
             this.currentPan.X += (deltaX / this.currentZoom);
             this.currentPan.Y += (deltaY / this.currentZoom);
+
+            if (deltaX != 0 || deltaY != 0)
+            {
+                this.wasPanningOperation = true;
+            }
 
             ApplyPanBoundaries();
 
@@ -465,7 +485,12 @@ public class PresentationForm : Form
                 if (this.displayPanel != null) this.displayPanel.Cursor = Cursors.Default;
                 break;
         }
-        SetupInitialView(); // This will trigger a repaint via its own Invalidate call.
+        if (this.hasLoaded) // Only call if form has already loaded
+        {
+            SetupInitialView();
+        }
+        // If not yet loaded, the Load event's call to SetupInitialView will handle it
+        // using the currentDisplayMode set above.
     }
 
     private void ApplyPanBoundaries()
